@@ -1,5 +1,5 @@
 
-static const char* last_minute_json_stats = "{}";
+static std::string last_minute_json_stats = "{}";
 
 std::string double_to_str(const double value) {
     std::stringstream stream;
@@ -17,7 +17,9 @@ class StatsWebServer {
         if (ev == MG_EV_HTTP_MSG) {
           struct mg_http_message *hm = (struct mg_http_message *) ev_data;
           if (mg_http_match_uri(hm, "/api/lastminstats")) {
-            mg_http_reply(c, 200, "Content-Type: application/json\r\n", "%s", last_minute_json_stats);  // Serve dynamic content
+            const char* stats = last_minute_json_stats.c_str();
+            fprintf(stderr, "Stats API Response: %s\n", stats);
+            mg_http_reply(c, 200, "Content-Type: application/json\r\n", "%s", stats);  // Serve dynamic content
           } else {
             struct mg_http_serve_opts opts = {.root_dir = "."};   // Serve
             mg_http_serve_dir(c, hm, &opts);                 // static content
@@ -32,6 +34,7 @@ class StatsWebServer {
         snprintf(port_str, sizeof(port_str)-1, "http://0.0.0.0:%u", port);
         mg_mgr_init(&mgr);                                      // Init manager
         mg_http_listen(&mgr, port_str, serve_request, &mgr);  // Setup listener
+        fprintf(stderr, "Stats Server: Started listening on port %u.\n", port);
         while (future.wait_for(std::chrono::milliseconds(1)) == std::future_status::timeout){
           mg_mgr_poll(&mgr, 1000);
         }
@@ -92,6 +95,6 @@ class StatsWebServer {
         json_str += ",\"SetStats\":";
         json_str += get_one_minute_stats_json(stats.m_get_cmd, quantile_list);
         json_str += "}";
-        last_minute_json_stats = json_str.c_str();
+        last_minute_json_stats = json_str;
     }
 };
