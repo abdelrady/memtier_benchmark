@@ -1,5 +1,6 @@
 
 static std::string last_minute_json_stats = "{}";
+static std::mutex stats_mutex;
 
 std::string double_to_str(const double value) {
     std::stringstream stream;
@@ -95,6 +96,8 @@ class StatsWebServer {
         json_str += ",\"SetStats\":";
         json_str += get_one_minute_stats_json(stats.m_get_cmd, quantile_list);
         json_str += "}";
+        stats_mutex.lock();
         last_minute_json_stats = json_str;
+        stats_mutex.unlock();
     }
 };
