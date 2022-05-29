@@ -104,6 +104,7 @@ struct benchmark_config {
     const char *tls_sni;
     SSL_CTX *openssl_ctx;
 #endif
+    unsigned short api_port;
 };
 
 

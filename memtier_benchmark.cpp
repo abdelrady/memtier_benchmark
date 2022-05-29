@@ -56,7 +56,7 @@
 #include "stats_web_server.h"
 
 static int log_level = 0;
-StatsWebServer web_server;
+StatsWebServer* web_server;
 void benchmark_log_file_line(int level, const char *filename, unsigned int line, const char *fmt, ...)
 {
     if (level > log_level)
@@ -139,6 +139,7 @@ static void config_print(FILE *file, struct benchmark_config *cfg)
         "num-slaves = %u-%u\n"
         "wait-timeout = %u-%u\n"
         "json-out-file = %s\n",
+        "api-port = %u\n",
         cfg->server,
         cfg->port,
         cfg->unix_socket,
@@ -186,7 +187,8 @@ static void config_print(FILE *file, struct benchmark_config *cfg)
         cfg->wait_ratio.a, cfg->wait_ratio.b,
         cfg->num_slaves.min, cfg->num_slaves.max,
         cfg->wait_timeout.min, cfg->wait_timeout.max,
-        cfg->json_out_file);
+        cfg->json_out_file,
+        cfg->api_port);
 }
 
 static void config_print_to_json(json_handler * jsonhandler, struct benchmark_config *cfg)
@@ -252,6 +254,8 @@ static void config_init_defaults(struct benchmark_config *cfg)
         cfg->server = "localhost";
     if (!cfg->port && !cfg->unix_socket)
         cfg->port = 6379;
+    if (!cfg->api_port)
+        cfg->api_port = 8081;
     if (!cfg->protocol)
         cfg->protocol = "redis";
     if (!cfg->run_count)
@@ -399,7 +403,8 @@ static int config_parse_args(int argc, char *argv[], struct benchmark_config *cf
         o_tls_cacert,
         o_tls_skip_verify,
         o_tls_sni,
-        o_hdr_file_prefix
+        o_hdr_file_prefix,
+        o_api_port
     };
 
     static struct option long_options[] = {
@@ -463,6 +468,7 @@ static int config_parse_args(int argc, char *argv[], struct benchmark_config *cf
         { "command",                    1, 0, o_command },
         { "command-key-pattern",        1, 0, o_command_key_pattern },
         { "command-ratio",              1, 0, o_command_ratio },
+        { "api-port",                   1, 0, o_api_port },
         { NULL,                         0, 0, 0 }
     };
 
@@ -495,6 +501,14 @@ static int config_parse_args(int argc, char *argv[], struct benchmark_config *cf
                     cfg->port = (unsigned short) strtoul(optarg, &endptr, 10);
                     if (!cfg->port || cfg->port > 65535 || !endptr || *endptr != '\0') {
                         fprintf(stderr, "error: port must be a number in the range [1-65535].\n");
+                        return -1;
+                    }
+                    break;
+                case o_api_port:
+                    endptr = NULL;
+                    cfg->api_port = (unsigned short) strtoul(optarg, &endptr, 10);
+                    if (!cfg->api_port || cfg->api_port > 65535 || !endptr || *endptr != '\0') {
+                        fprintf(stderr, "error: api-port must be a number in the range [1-65535].\n");
                         return -1;
                     }
                     break;
@@ -890,6 +904,7 @@ void usage() {
             "      --hide-histogram           Don't print detailed latency histogram\n"
             "      --print-percentiles        Specify which percentiles info to print on the results table (by default prints percentiles: 50,99,99.9)\n"
             "      --cluster-mode             Run client in cluster mode\n"
+            "      --api-port=PORT            Local API Stats Server port (default: 8081)\n"
             "  -h, --help                     Display this help\n"
             "  -v, --version                  Display version information\n"
             "\n"
@@ -1020,7 +1035,7 @@ run_stats run_benchmark(int run_id, benchmark_config* cfg, object_generator* obj
 
         processed_seconds++;
         if(processed_seconds % 60 == 0) {
-            web_server.calc_last_minute_stats(threads, cfg->print_percentiles.quantile_list);
+            web_server->calc_last_minute_stats(threads, cfg->print_percentiles.quantile_list);
         }
 
         unsigned long int total_ops = 0;
@@ -1442,7 +1457,8 @@ int main(int argc, char *argv[])
     }
 
     // Launch web server in background to serve consumers requests
-    web_server.start_server();
+    web_server = new StatsWebServer(cfg.api_port);
+    web_server->start_server();
 
     if (!cfg.verify_only) {
         std::vector<run_stats> all_stats;
@@ -1545,7 +1561,7 @@ int main(int argc, char *argv[])
     }
 
     // Kill web server thread
-    web_server.stop_server();
+    web_server->stop_server();
 
     if (outfile != stdout) {
         fclose(outfile);

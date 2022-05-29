@@ -11,6 +11,7 @@ std::string double_to_str(const double value) {
 class StatsWebServer {
     std::promise<void> signal_exit; //A promise object
     std::thread serve_http_thread;
+    unsigned short api_port;
 
     static void serve_request(struct mg_connection *c, int ev, void *ev_data, void *fn_data) {
         if (ev == MG_EV_HTTP_MSG) {
@@ -24,11 +25,13 @@ class StatsWebServer {
         }
     }
 
-    static void serve_http(std::future<void> future)
+    static void serve_http(unsigned short port, std::future<void> future)
     {
         struct mg_mgr mgr;
+        char port_str[25];
+        snprintf(port_str, sizeof(port_str)-1, "http://0.0.0.0:%u", port);
         mg_mgr_init(&mgr);                                      // Init manager
-        mg_http_listen(&mgr, "http://0.0.0.0:8081", serve_request, &mgr);  // Setup listener
+        mg_http_listen(&mgr, port_str, serve_request, &mgr);  // Setup listener
         while (future.wait_for(std::chrono::milliseconds(1)) == std::future_status::timeout){
           mg_mgr_poll(&mgr, 1000);
         }
@@ -64,9 +67,13 @@ class StatsWebServer {
     }
 
     public:
+    StatsWebServer(unsigned short api_port) {
+      this->api_port = api_port;
+    }
+
     void start_server() {
         std::future<void> future = signal_exit.get_future();//create future objects
-        serve_http_thread = std::thread(&StatsWebServer::serve_http, std::move(future));
+        serve_http_thread = std::thread(&StatsWebServer::serve_http, this->api_port, std::move(future));
     }
 
     void stop_server(){
