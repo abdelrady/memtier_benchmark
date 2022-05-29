@@ -629,6 +629,15 @@ unsigned long int client_group::get_duration_usec(void)
     return duration;
 }
 
+one_second_stats client_group::get_one_min_stats()
+{
+    one_second_stats stats(0);
+    for (std::vector<client*>::iterator i = m_clients.begin(); i != m_clients.end(); i++) {
+        stats.merge((*i)->get_stats()->get_one_min_cmd_stats());
+    }
+    return stats;
+}
+
 void client_group::merge_run_stats(run_stats* target)
 {
     assert(target != NULL);

@@ -32,6 +32,8 @@
 #include <errno.h>
 #include <sys/time.h>
 #include <sys/resource.h>
+#include <iomanip>
+#include <sstream>
 
 #ifdef USE_TLS
 #include <openssl/crypto.h>
@@ -42,14 +44,19 @@
 #endif
 
 #include <stdexcept>
+#include <chrono>
+#include <future>
 
 #include "client.h"
 #include "JSON_handler.h"
 #include "obj_gen.h"
 #include "memtier_benchmark.h"
-
+#include "cg_thread.h"
+#include "mongoose.h"
+#include "stats_web_server.h"
 
 static int log_level = 0;
+StatsWebServer web_server;
 void benchmark_log_file_line(int level, const char *filename, unsigned int line, const char *fmt, ...)
 {
     if (level > log_level)
@@ -959,68 +966,6 @@ void usage() {
     exit(2);
 }
 
-static void* cg_thread_start(void *t);
-
-struct cg_thread {
-    unsigned int m_thread_id;
-    benchmark_config* m_config;
-    object_generator* m_obj_gen;
-    client_group* m_cg;
-    abstract_protocol* m_protocol;
-    pthread_t m_thread;
-    bool m_finished;
-
-    cg_thread(unsigned int id, benchmark_config* config, object_generator* obj_gen) :
-        m_thread_id(id), m_config(config), m_obj_gen(obj_gen), m_cg(NULL), m_protocol(NULL), m_finished(false)
-    {
-        m_protocol = protocol_factory(m_config->protocol);
-        assert(m_protocol != NULL);
-
-        m_cg = new client_group(m_config, m_protocol, m_obj_gen);
-    }
-
-    ~cg_thread()
-    {
-        if (m_cg != NULL) {
-            delete m_cg;
-        }
-        if (m_protocol != NULL) {
-            delete m_protocol;
-        }
-    }
-
-    int prepare(void)
-    {
-        if (m_cg->create_clients(m_config->clients) < (int) m_config->clients)
-            return -1;
-        return m_cg->prepare();
-    }
-
-    int start(void)
-    {
-        return pthread_create(&m_thread, NULL, cg_thread_start, (void *)this);
-    }
-
-    void join(void)
-    {
-        int* retval;
-        int ret;
-
-        ret = pthread_join(m_thread, (void **)&retval);
-        assert(ret == 0);
-    }
-
-};
-
-static void* cg_thread_start(void *t)
-{
-    cg_thread* thread = (cg_thread*) t;
-    thread->m_cg->run();
-    thread->m_finished = true;
-
-    return t;
-}
-
 void size_to_str(unsigned long int size, char *buf, int buf_len)
 {
     if (size >= 1024*1024*1024) {
@@ -1067,9 +1012,16 @@ run_stats run_benchmark(int run_id, benchmark_config* cfg, object_generator* obj
 
     // provide some feedback...
     unsigned int active_threads = 0;
+    unsigned int processed_seconds = 0;
+
     do {
         active_threads = 0;
         sleep(1);
+
+        processed_seconds++;
+        if(processed_seconds % 60 == 0) {
+            web_server.calc_last_minute_stats(threads, cfg->print_percentiles.quantile_list);
+        }
 
         unsigned long int total_ops = 0;
         unsigned long int total_bytes = 0;
@@ -1489,6 +1441,9 @@ int main(int argc, char *argv[])
         outfile = stdout;
     }
 
+    // Launch web server in background to serve consumers requests
+    web_server.start_server();
+
     if (!cfg.verify_only) {
         std::vector<run_stats> all_stats;
         all_stats.reserve(cfg.run_count);
@@ -1588,6 +1543,9 @@ int main(int argc, char *argv[])
         delete verify_protocol;
         event_base_free(verify_event_base);
     }
+
+    // Kill web server thread
+    web_server.stop_server();
 
     if (outfile != stdout) {
         fclose(outfile);
