@@ -32,6 +32,8 @@
 #include <errno.h>
 #include <sys/time.h>
 #include <sys/resource.h>
+#include <iomanip>
+#include <sstream>
 
 #ifdef USE_TLS
 #include <openssl/crypto.h>
@@ -42,14 +44,19 @@
 #endif
 
 #include <stdexcept>
+#include <chrono>
+#include <future>
 
 #include "client.h"
 #include "JSON_handler.h"
 #include "obj_gen.h"
 #include "memtier_benchmark.h"
-
+#include "cg_thread.h"
+#include "mongoose.h"
+#include "stats_web_server.h"
 
 static int log_level = 0;
+StatsWebServer* web_server;
 void benchmark_log_file_line(int level, const char *filename, unsigned int line, const char *fmt, ...)
 {
     if (level > log_level)
@@ -132,6 +139,7 @@ static void config_print(FILE *file, struct benchmark_config *cfg)
         "num-slaves = %u-%u\n"
         "wait-timeout = %u-%u\n"
         "json-out-file = %s\n",
+        "api-port = %u\n",
         cfg->server,
         cfg->port,
         cfg->unix_socket,
@@ -179,7 +187,8 @@ static void config_print(FILE *file, struct benchmark_config *cfg)
         cfg->wait_ratio.a, cfg->wait_ratio.b,
         cfg->num_slaves.min, cfg->num_slaves.max,
         cfg->wait_timeout.min, cfg->wait_timeout.max,
-        cfg->json_out_file);
+        cfg->json_out_file,
+        cfg->api_port);
 }
 
 static void config_print_to_json(json_handler * jsonhandler, struct benchmark_config *cfg)
@@ -245,6 +254,8 @@ static void config_init_defaults(struct benchmark_config *cfg)
         cfg->server = "localhost";
     if (!cfg->port && !cfg->unix_socket)
         cfg->port = 6379;
+    if (!cfg->api_port)
+        cfg->api_port = 8081;
     if (!cfg->protocol)
         cfg->protocol = "redis";
     if (!cfg->run_count)
@@ -392,7 +403,8 @@ static int config_parse_args(int argc, char *argv[], struct benchmark_config *cf
         o_tls_cacert,
         o_tls_skip_verify,
         o_tls_sni,
-        o_hdr_file_prefix
+        o_hdr_file_prefix,
+        o_api_port
     };
 
     static struct option long_options[] = {
@@ -456,6 +468,7 @@ static int config_parse_args(int argc, char *argv[], struct benchmark_config *cf
         { "command",                    1, 0, o_command },
         { "command-key-pattern",        1, 0, o_command_key_pattern },
         { "command-ratio",              1, 0, o_command_ratio },
+        { "api-port",                   1, 0, o_api_port },
         { NULL,                         0, 0, 0 }
     };
 
@@ -488,6 +501,14 @@ static int config_parse_args(int argc, char *argv[], struct benchmark_config *cf
                     cfg->port = (unsigned short) strtoul(optarg, &endptr, 10);
                     if (!cfg->port || cfg->port > 65535 || !endptr || *endptr != '\0') {
                         fprintf(stderr, "error: port must be a number in the range [1-65535].\n");
+                        return -1;
+                    }
+                    break;
+                case o_api_port:
+                    endptr = NULL;
+                    cfg->api_port = (unsigned short) strtoul(optarg, &endptr, 10);
+                    if (!cfg->api_port || cfg->api_port > 65535 || !endptr || *endptr != '\0') {
+                        fprintf(stderr, "error: api-port must be a number in the range [1-65535].\n");
                         return -1;
                     }
                     break;
@@ -883,6 +904,7 @@ void usage() {
             "      --hide-histogram           Don't print detailed latency histogram\n"
             "      --print-percentiles        Specify which percentiles info to print on the results table (by default prints percentiles: 50,99,99.9)\n"
             "      --cluster-mode             Run client in cluster mode\n"
+            "      --api-port=PORT            Local API Stats Server port (default: 8081)\n"
             "  -h, --help                     Display this help\n"
             "  -v, --version                  Display version information\n"
             "\n"
@@ -959,68 +981,6 @@ void usage() {
     exit(2);
 }
 
-static void* cg_thread_start(void *t);
-
-struct cg_thread {
-    unsigned int m_thread_id;
-    benchmark_config* m_config;
-    object_generator* m_obj_gen;
-    client_group* m_cg;
-    abstract_protocol* m_protocol;
-    pthread_t m_thread;
-    bool m_finished;
-
-    cg_thread(unsigned int id, benchmark_config* config, object_generator* obj_gen) :
-        m_thread_id(id), m_config(config), m_obj_gen(obj_gen), m_cg(NULL), m_protocol(NULL), m_finished(false)
-    {
-        m_protocol = protocol_factory(m_config->protocol);
-        assert(m_protocol != NULL);
-
-        m_cg = new client_group(m_config, m_protocol, m_obj_gen);
-    }
-
-    ~cg_thread()
-    {
-        if (m_cg != NULL) {
-            delete m_cg;
-        }
-        if (m_protocol != NULL) {
-            delete m_protocol;
-        }
-    }
-
-    int prepare(void)
-    {
-        if (m_cg->create_clients(m_config->clients) < (int) m_config->clients)
-            return -1;
-        return m_cg->prepare();
-    }
-
-    int start(void)
-    {
-        return pthread_create(&m_thread, NULL, cg_thread_start, (void *)this);
-    }
-
-    void join(void)
-    {
-        int* retval;
-        int ret;
-
-        ret = pthread_join(m_thread, (void **)&retval);
-        assert(ret == 0);
-    }
-
-};
-
-static void* cg_thread_start(void *t)
-{
-    cg_thread* thread = (cg_thread*) t;
-    thread->m_cg->run();
-    thread->m_finished = true;
-
-    return t;
-}
-
 void size_to_str(unsigned long int size, char *buf, int buf_len)
 {
     if (size >= 1024*1024*1024) {
@@ -1067,9 +1027,18 @@ run_stats run_benchmark(int run_id, benchmark_config* cfg, object_generator* obj
 
     // provide some feedback...
     unsigned int active_threads = 0;
+    unsigned int processed_seconds = 0;
+
     do {
         active_threads = 0;
         sleep(1);
+
+        // Collect last 60 sec stats
+        if(processed_seconds % 60 == 0) {
+            web_server->calc_last_minute_stats(threads, cfg->print_percentiles.quantile_list);
+            processed_seconds = 0;
+        }
+        processed_seconds++;
 
         unsigned long int total_ops = 0;
         unsigned long int total_bytes = 0;
@@ -1489,6 +1458,10 @@ int main(int argc, char *argv[])
         outfile = stdout;
     }
 
+    // Launch web server in background to serve consumers requests
+    web_server = new StatsWebServer(cfg.api_port);
+    web_server->start_server();
+
     if (!cfg.verify_only) {
         std::vector<run_stats> all_stats;
         all_stats.reserve(cfg.run_count);
@@ -1588,6 +1561,9 @@ int main(int argc, char *argv[])
         delete verify_protocol;
         event_base_free(verify_event_base);
     }
+
+    // Kill web server thread
+    web_server->stop_server();
 
     if (outfile != stdout) {
         fclose(outfile);

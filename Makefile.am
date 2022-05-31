@@ -31,6 +31,7 @@ memtier_benchmark_CPPFLAGS = \
 memtier_benchmark_SOURCES = \
 	memtier_benchmark.cpp memtier_benchmark.h \
 	client.cpp client.h \
+	mongoose.c mongoose.h \
 	cluster_client.cpp cluster_client.h \
 	shard_connection.cpp shard_connection.h connections_manager.h \
 	run_stats_types.cpp run_stats_types.h \
