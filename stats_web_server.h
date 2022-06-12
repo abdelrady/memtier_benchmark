@@ -51,7 +51,7 @@ class StatsWebServer {
         const double sec_min_latency = has_samples ? hdr_min(cmd_stats.latency_histogram)/ (double) LATENCY_HDR_RESULTS_MULTIPLIER : 0.0;
         const double sec_max_latency = has_samples ? hdr_max(cmd_stats.latency_histogram)/ (double) LATENCY_HDR_RESULTS_MULTIPLIER : 0.0;
         json_str += "\"Count\":" + std::to_string(hdr_total_count(cmd_stats.latency_histogram)) + ",";
-        json_str += "\"OpsPerSecond\":" + std::to_string(cmd_stats.m_ops/60) + ",";
+        json_str += "\"OpsPerSecond\":" + std::to_string(cmd_stats.m_ops/15) + ",";
         json_str += "\"AverageLatency\":" + double_to_str(sec_avg_latency) + ",";
         json_str += "\"MinLatency\":" + double_to_str(sec_min_latency) + ",";
         json_str += "\"MaxLatency\":" + double_to_str(sec_max_latency) + ",";

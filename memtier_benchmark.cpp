@@ -1033,8 +1033,8 @@ run_stats run_benchmark(int run_id, benchmark_config* cfg, object_generator* obj
         active_threads = 0;
         sleep(1);
 
-        // Collect last 60 sec stats
-        if(processed_seconds % 60 == 0) {
+        // Collect last 15 sec stats
+        if(processed_seconds % 15 == 0) {
             web_server->calc_last_minute_stats(threads, cfg->print_percentiles.quantile_list);
             processed_seconds = 0;
         }
