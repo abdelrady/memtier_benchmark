@@ -186,7 +186,7 @@ public:
     unsigned long int get_total_latency(void);
     unsigned long int get_duration_usec(void);
 
-    one_second_stats get_one_min_stats();
+    one_second_stats get_interval_stats();
     void merge_run_stats(run_stats* target);
 };
 
