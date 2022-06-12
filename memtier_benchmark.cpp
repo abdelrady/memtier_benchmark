@@ -918,6 +918,7 @@ void usage() {
             "      --print-percentiles        Specify which percentiles info to print on the results table (by default prints percentiles: 50,99,99.9)\n"
             "      --cluster-mode             Run client in cluster mode\n"
             "      --api-port=PORT            Local API Stats Server port (default: 8081)\n"
+            "      --api-report-interval      API Stats calculation interval in seconds (default: 60)\n"
             "  -h, --help                     Display this help\n"
             "  -v, --version                  Display version information\n"
             "\n"
@@ -1048,7 +1049,7 @@ run_stats run_benchmark(int run_id, benchmark_config* cfg, object_generator* obj
 
         // Collect last n sec stats
         if(processed_seconds % cfg->api_report_interval == 0) {
-            web_server->calc_last_interval_stats(threads, cfg->print_percentiles.quantile_list);
+            web_server->calc_last_interval_stats(threads, cfg->print_percentiles.quantile_list, cfg->api_report_interval);
             processed_seconds = 0;
         }
         processed_seconds++;
