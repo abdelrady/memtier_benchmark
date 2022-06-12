@@ -304,9 +304,9 @@ void run_stats::save_csv_one_sec(FILE *f,
     }
 }
 
-one_second_stats run_stats::get_one_min_cmd_stats() {
+one_second_stats run_stats::get_interval_cmd_stats(unsigned short interval) {
     one_second_stats result(0);
-    int sec_remaining = 60;
+    int sec_remaining = interval;
     std::list<one_second_stats>::iterator i = m_stats.end();
     while (sec_remaining > 0 && i != m_stats.begin()) {
       i--;

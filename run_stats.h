@@ -130,7 +130,7 @@ public:
     void aggregate_average(const std::vector<run_stats>& all_stats);
     void summarize(totals& result) const;
     void merge(const run_stats& other, int iteration);
-    one_second_stats get_one_min_cmd_stats();
+    one_second_stats get_interval_cmd_stats(unsigned short interval);
     std::vector<one_sec_cmd_stats> get_one_sec_cmd_stats_get();
     std::vector<one_sec_cmd_stats> get_one_sec_cmd_stats_set();
     std::vector<one_sec_cmd_stats> get_one_sec_cmd_stats_wait();

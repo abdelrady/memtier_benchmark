@@ -105,6 +105,7 @@ struct benchmark_config {
     SSL_CTX *openssl_ctx;
 #endif
     unsigned short api_port;
+    unsigned short api_report_interval;
 };
 
 

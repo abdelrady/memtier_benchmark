@@ -1,5 +1,5 @@
 
-static std::string last_minute_json_stats = "{}";
+static std::string last_interval_json_stats = "{}";
 static std::mutex stats_mutex;
 
 std::string double_to_str(const double value) {
@@ -13,12 +13,13 @@ class StatsWebServer {
     std::promise<void> signal_exit; //A promise object
     std::thread serve_http_thread;
     unsigned short api_port;
+    unsigned short api_report_interval;
 
     static void serve_request(struct mg_connection *c, int ev, void *ev_data, void *fn_data) {
         if (ev == MG_EV_HTTP_MSG) {
           struct mg_http_message *hm = (struct mg_http_message *) ev_data;
           if (mg_http_match_uri(hm, "/api/lastminstats")) {
-            const char* stats = last_minute_json_stats.c_str();
+            const char* stats = last_interval_json_stats.c_str();
             fprintf(stderr, "Stats API Response: %s\n", stats);
             mg_http_reply(c, 200, "Content-Type: application/json\r\n", "%s", stats);  // Serve dynamic content
           } else {
@@ -42,7 +43,7 @@ class StatsWebServer {
         mg_mgr_free(&mgr);                                      // Cleanup
     }
 
-    std::string get_one_minute_stats_json(one_sec_cmd_stats cmd_stats, std::vector<float> quantile_list){
+    std::string get_last_m_sec_stats_json(one_sec_cmd_stats cmd_stats, std::vector<float> quantile_list, unsigned short report_interval){
         std::string json_str = "";
         json_str+="{";
         const bool has_samples = hdr_total_count(cmd_stats.latency_histogram)>0;
@@ -51,7 +52,7 @@ class StatsWebServer {
         const double sec_min_latency = has_samples ? hdr_min(cmd_stats.latency_histogram)/ (double) LATENCY_HDR_RESULTS_MULTIPLIER : 0.0;
         const double sec_max_latency = has_samples ? hdr_max(cmd_stats.latency_histogram)/ (double) LATENCY_HDR_RESULTS_MULTIPLIER : 0.0;
         json_str += "\"Count\":" + std::to_string(hdr_total_count(cmd_stats.latency_histogram)) + ",";
-        json_str += "\"OpsPerSecond\":" + std::to_string(cmd_stats.m_ops/60) + ",";
+        json_str += "\"OpsPerSecond\":" + std::to_string(cmd_stats.m_ops/report_interval) + ",";
         json_str += "\"AverageLatency\":" + double_to_str(sec_avg_latency) + ",";
         json_str += "\"MinLatency\":" + double_to_str(sec_min_latency) + ",";
         json_str += "\"MaxLatency\":" + double_to_str(sec_max_latency) + ",";
@@ -71,8 +72,9 @@ class StatsWebServer {
     }
 
     public:
-    StatsWebServer(unsigned short api_port) {
+    StatsWebServer(unsigned short api_port, unsigned short api_report_interval) {
       this->api_port = api_port;
+      this->api_report_interval = api_report_interval;
     }
 
     void start_server() {
@@ -85,19 +87,19 @@ class StatsWebServer {
         serve_http_thread.join();
     }
 
-    void calc_last_minute_stats(std::vector<cg_thread*> threads, std::vector<float> quantile_list) {
+    void calc_last_interval_stats(std::vector<cg_thread*> threads, std::vector<float> quantile_list, unsigned short report_interval) {
         one_second_stats stats(0);
         for (std::vector<cg_thread*>::iterator i = threads.begin(); i != threads.end(); i++) {
-            stats.merge((*i)->m_cg->get_one_min_stats());
+            stats.merge((*i)->m_cg->get_interval_stats(report_interval));
         }
         std::string json_str = "";
         json_str += "{\"GetStats\":";
-        json_str += get_one_minute_stats_json(stats.m_set_cmd, quantile_list);
+        json_str += get_last_m_sec_stats_json(stats.m_set_cmd, quantile_list, report_interval);
         json_str += ",\"SetStats\":";
-        json_str += get_one_minute_stats_json(stats.m_get_cmd, quantile_list);
+        json_str += get_last_m_sec_stats_json(stats.m_get_cmd, quantile_list, report_interval);
         json_str += "}";
         stats_mutex.lock();
-        last_minute_json_stats = json_str;
+        last_interval_json_stats = json_str;
         stats_mutex.unlock();
     }
 };
