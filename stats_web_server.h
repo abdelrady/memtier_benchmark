@@ -94,9 +94,9 @@ class StatsWebServer {
         }
         std::string json_str = "";
         json_str += "{\"GetStats\":";
-        json_str += get_last_m_sec_stats_json(stats.m_set_cmd, quantile_list, report_interval);
-        json_str += ",\"SetStats\":";
         json_str += get_last_m_sec_stats_json(stats.m_get_cmd, quantile_list, report_interval);
+        json_str += ",\"SetStats\":";
+        json_str += get_last_m_sec_stats_json(stats.m_set_cmd, quantile_list, report_interval);
         json_str += "}";
         stats_mutex.lock();
         last_interval_json_stats = json_str;
