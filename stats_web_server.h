@@ -23,8 +23,8 @@ class StatsWebServer {
             fprintf(stderr, "Stats API Response: %s\n", stats);
             mg_http_reply(c, 200, "Content-Type: application/json\r\n", "%s", stats);  // Serve dynamic content
           } else {
-            struct mg_http_serve_opts opts = {.root_dir = "."};   // Serve
-            mg_http_serve_dir(c, hm, &opts);                 // static content
+            const char* data = "";
+            mg_http_reply(c, 404, NULL, "%s", data);  // return 404 NOT FOUND
           }
         }
     }
@@ -33,7 +33,7 @@ class StatsWebServer {
     {
         struct mg_mgr mgr;
         char port_str[25];
-        snprintf(port_str, sizeof(port_str)-1, "http://0.0.0.0:%u", port);
+        snprintf(port_str, sizeof(port_str)-1, "http://127.0.0.1:%u", port);
         mg_mgr_init(&mgr);                                      // Init manager
         mg_http_listen(&mgr, port_str, serve_request, &mgr);  // Setup listener
         fprintf(stderr, "Stats Server: Started listening on port %u.\n", port);
